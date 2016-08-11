@@ -1,0 +1,15 @@
+{
+  "name": "btclibs",
+  "version": "1.0.0",
+  "description": "tries to combine bitcore-lib and bitcore-explorers",
+  "main": "fetcher.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bitcore-lib": "^0.13.18",
+    "bitcore-payment-protocol": "^1.1.0"
+  }
+}

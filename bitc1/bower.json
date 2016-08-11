@@ -1,0 +1,10 @@
+{
+  "name": "bitc1",
+  "version": "0.0.1",
+  "license": "MIT",
+  "dependencies": {
+    "bitcore-lib": "^0.13.7",
+    "bitcore-mnemonic": "^1.0.1",
+    "bitcore-explorers": "^1.0.1"
+  }
+}
