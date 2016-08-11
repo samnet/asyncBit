@@ -1,50 +1,25 @@
 /*
 Dependencies: bitcore (global), unirest (almost global),
-
-
-> dependencies: check taht unirest and bitcore-lib are front-end compatible
-
+>> check taht unirest and bitcore-lib are front-end compatible
 
 // browsify to compile
-
-
-> dev on node
 > bluebird - is a promise library
 > unirest - is a http request
 > JQUERY deferred vs. promise
 > management of asynchronicity
-> after line 260 of Bundle client
-> translation to ionic framework
-> pgming in node vs. directly in jscript?
-
 Primise.each(<iterator>, (returns a promise))
-
 */
-
+"use strict";
 var btc = require('bitcore-lib')
 var unirest = require('unirest')
-var privKey = new btc.PrivateKey.fromWIF('KxqWSvnijPuc9tQpbbvypfHgq6yWF1pDADxcNMxpwE5QASCxJDGp')
+var privKey = new btc.PrivateKey.fromWIF('KyLuCNsxddnqpdJW1Q3q2mQtkssThJUfcGq9hdCE8W72xYPD3He3')
+  // 1CA1rufdFggCkd4kZQaff6NxZa1P9AfrrE
 var pubKey = privKey.toPublicKey()
 var addr = pubKey.toAddress(btc.Networks.livenet)
-var pubKeyServer = new btc.PublicKey('03ca9bbdcb0437419b94fdf121826d0be2c31df38daea49f001a13a716cfb64123')
+var pubKeyServer = new btc.PublicKey('02e4e7fa83a6c014cf005e0773bcfd02db1095a72d12df597a34a655e2e9cc6ab7')
+  // 17wT1VgpwdWKqvLza8y2AVWoiLpaLJ8XHq
 var dest = pubKeyServer.toAddress(btc.Networks.livenet)
-var depositAmount = 100000, incrementAmount = 15000
-
-// Note that in fact we dont need use getHTML-like stuff... bitcore can retrieve UTXOs:
-// var fetchUTXOs = function(anAddr){
-//   var Insight = require('bitcore-explorers').Insight;
-//   var insight = new Insight();
-//   insight.getUnspentUtxos(anAddr, function(err, utxos) {
-//     if (err){
-//       console.log("problem retrieving the utxos of "+ anAddr)
-//     } else {
-//       return utxos
-//     }
-//   });
-// };
-
-
-
+var depositAmount = 66335, incrementAmount = 15000, feeAmount = 13333
 
 // Process the result of http request to blockchain.info into bitcore's UTXO object format
 function HTTPtoUTXO(response, anAddr){
@@ -65,104 +40,77 @@ function HTTPtoUTXO(response, anAddr){
 
 // Return, as a promise, an unigned transaction
 function txPromise(pubkey, toAddr, amount){
-
+  var srcAddr = pubkey.toAddress(btc.Networks.livenet)
   return new Promise(function(resolve, reject) {
-
-    var anAddr = pubkey.toAddress(btc.Networks.livenet)
-
-    unirest.get('https://blockchain.info/unspent?cors=true&active=' + anAddr)
+    unirest.get('https://blockchain.info/unspent?cors=true&active=' + srcAddr)
     .end(function(response) {
-      UTXOs = HTTPtoUTXO(response, anAddr)
-      transaction = new btc.Transaction()
+      var UTXOs = HTTPtoUTXO(response, srcAddr)
+      console.log('Utxos retrieved and processed:', UTXOs)
+      var transaction = new btc.Transaction()
         .from(UTXOs)
         .to(toAddr, amount)
-        .change(anAddr)
+        .change(srcAddr)
+        .fee(feeAmount)
        resolve(transaction) // no reject here !! Todo.
     })
   })
 };
 
-function scriptAddrMaker(pubKey1, pubKey2){
-  var publicKeys = [
-    pubKey1,
-    pubKey2
-  ];
-  var scriptAddr = new btc.Address(publicKeys, 2);
-  return scriptAddr
-}
-
-scriptAddr = scriptAddrMaker(pubKey, pubKeyServer)
+// The Client funds the Payment Channel
+var scriptAddr = new btc.Address([pubKey, pubKeyServer],2, btc.Networks.livenet)
 console.log(scriptAddr)
 txPromise(pubKey, scriptAddr, depositAmount).then(function(out){
+  //console.log('Funding tx, UNsigned: ', out)
   out.sign(privKey)
-  console.log(out)
+  console.log('Funding tx, signed: ', out)
 })
+//debugger;
 
+// Function to automate spending from a P2SH address
 function txFromP2shPromise(pubKey1, pubKey2, amountTo2){
 
+  var publicKeys = [pubKey1, pubKey2];
+  var scriptAddr = new btc.Address(publicKeys, 2, btc.Networks.livenet)
+  var redeemScript = new btc.Script(scriptAddr)
+  var addr1 = pubKey1.toAddress().toString();
+  var addr2 = pubKey2.toAddress().toString();
+  console.log(redeemScript)
+
   return new Promise(function(resolve, reject) {
-
-    var scriptAddr = scriptAddrMaker(pubkey1, pubkey2)
     console.log('salut')
-    var redeemScript = btc.Script.buildMultisigOut(publicKeys, 2);
-
-    console.log(redeemScript)
-    var addr1 = pubKey1.toAddress().toString();
-    var addr2 = pubKey2.toAddress().toString();
-
     unirest.get('https://blockchain.info/unspent?cors=true&active=' + scriptAddr)
-    .end(function(response) {
-      var body = response.body;
-      var utxosRaw = body["unspent_outputs"]
-      var UTXOs = []
-      utxosRaw.forEach(function(elem){
-        var utxo = new btc.Transaction.UnspentOutput({
-          "txId" : elem.tx_hash_big_endian,
-          "outputIndex" : elem.tx_output_n,
-          "address" : scriptAddr.toString(), // perhaps is teh toSring useful for communication purposes
-          "script" : elem.script,
-          //  "script" : new bitcore.Script(scriptAddr).toHex(), // would not redeemScript work here? How do they go from addr to script
-          "satoshis" : elem.value })
-        UTXOs.push(utxo);
-      })
-      transaction = new btc.Transaction()
-        .from(UTXOs)
-        .to(addr2, amountTo2)
-        .change(addr1)
-      resolve(transaction) // no reject here !! Todo.
-    });
+      .end(function(response) {
+        var body = response.body;
+        var utxosRaw = body["unspent_outputs"]
+        console.log('UtxosRaw: ', utxosRaw)
+        var UTXOs = []
+        utxosRaw.forEach(function(elem){
+          var utxo = new btc.Transaction.UnspentOutput({
+            "txId" : elem.tx_hash_big_endian,
+            "outputIndex" : elem.tx_output_n,
+            "address" : scriptAddr, // .toString() / .toHex() ?
+            "script" : elem.script,
+            //  "script" : new bitcore.Script(scriptAddr).toHex(), // would not redeemScript work here? How do they go from addr to script
+            "satoshis" : elem.value })
+          UTXOs.push(utxo);
+        })
+        var transaction = new btc.Transaction()
+          .from(UTXOs, publicKeys, 2)
+          .to(addr2, amountTo2)
+          .change(addr1)
+          .fee(feeAmount)
+        resolve(transaction) // no reject here !! Todo.
+      });
   })
-
 };
 
-txFromP2shPromise(pubKey, pubKeyServer, incrementAmount).then(function(out){
-  console.log(out)
-})
+var privKeyServer = new btc.PrivateKey.fromWIF('L4hdBFMfqYBP7XB9teoiwKTNZq9LoJRfJYtiFTxyHMt74MX97c4X')
+setTimeout(function(){
+  txFromP2shPromise(pubKey, pubKeyServer, incrementAmount).then(function(out){
+    console.log('txFromP2shPromise returned: ', out)
+    out.sign([privKey,privKeyServer])
+    console.log('Signed spend transaction: ', out)
+  })
+},10000)
+
 console.log('hi')
-
-
-
-
-
-//
-//   console.log(output)
-// })
-// console.log(sstx)
-// // SIMPLE TX
-// function simpleTx (fromAddr, toAddr, amount) {
-//   var transaction = new
-//   getHTML(fromAddr, function(html){
-//     var UTXOs = parseUTXOs(html)
-//     transaction = new btc.Transaction()
-//      .from(UTXOs)
-//      .to(toAddr, amount);
-//    })
-//   return transaction;
-// });
-
-//
-//
-//
-//
-// var address = pubKeyClient.toAddress().toString();
-//
